@@ -38,15 +38,6 @@ A1:
         LEA     SI,TBL
         mov     ds:[si+6],cx
         CALL    WORD PTR CS:[BX+PROGS_OFFSETS]
-        ;100h   - disk marked
-        ;101h   - Отсутствует строка
-        ;102H   - Это не FLOPPY диск
-        ;103H   - Файловая система не FAT
-        ;104H   - File shifted
-        ;105H   - Мало параметров
-        ;106H   - Число вылезает за границы диапазона
-        ;107H   - Comp name setted
-        CALL    PRINT_MESSAGE
         JMP     SHORT   END1
 USAGE:
         LEA     SI,USAGE_
@@ -54,19 +45,6 @@ USAGE:
 END1:
         MOV     AX,4C00H
         INT     21H
-PRINT_MESSAGE   PROC
-        LEA     SI,FIRST_ERROR
-        SHL     AX,1
-        XOR     BX,BX
-        XCHG    AH,BL
-        OR      BX,BX
-        JZ      PRINT_MESSAGE1
-        ADD     SI,BX
-        ADD     SI,AX
-PRINT_MESSAGE1:
-        MOV     SI,DS:[SI]
-        JMP     WW
-ENDP
 ;Mark a diskette
 MARK    PROC
         ;IN DS:SI - TABLE
@@ -75,6 +53,7 @@ MARK    PROC
         ;+4 INPUT LINE SEG
         ;+6 NUM OF FILES IN INPUT LINE SEG
 
+        PUSH    AX
         PUSH    BX
         PUSH    CX
         PUSH    DX
@@ -88,8 +67,26 @@ MARK    PROC
         CALL    MARK_BOOT
         JC      MARK_ER
         CALL    MARK_ROOT
-        MOV     AX,100H
+        LEA     SI,DISK_MARKED
+        JNC     MARK_EX
 MARK_ER:
+        LEA     SI,DISK_ERROR
+        OR      AH,AH
+        JNZ     MARK_ER1
+        LEA     SI,VERY_MANY
+        SUB     AL,80H
+        JZ      MARK_ER1
+        LEA     SI,VERY_SMALL
+        DEC     AL
+        JZ      MARK_ER1
+        LEA     SI,NO_FLOPPY
+        DEC     AL
+        JZ      MARK_ER1
+        LEA     SI,NON_FAT
+MARK_ER1:
+        STC
+MARK_EX:
+        CALL    WW
         POP     ES
         POP     DS
         POP     BP
@@ -98,8 +95,8 @@ MARK_ER:
         POP     DX
         POP     CX
         POP     BX
+        POP     AX
         RET
-        ;ERROR IN AX
 ENDP
 CHECK_MARK_ERRORS       PROC
         ;IN DS:SI TABLE
@@ -110,7 +107,7 @@ CHECK_MARK_ERRORS       PROC
         PUSH    SI
         PUSH    DS
         MOV     CX,DS:[SI+6]
-        MOV     AX,101H
+        MOV     AX,100H
         CMP     CX,5
         JNB     CHECK_MARK_ER
         OR      CX,CX
@@ -166,13 +163,14 @@ CHECK_MARK_OK:
         SUB     AL,30H
         STOSB
 CHECK_MARK_EX:
-        CLC
-        JMP     SHORT   CHECK_MARK_ER11
-CHECK_MARK_ER:
-        STC
-CHECK_MARK_ER11:
         POP     DS
         POP     SI
+        CLC
+        RET
+CHECK_MARK_ER:
+        POP     DS
+        POP     SI
+        STC
         RET
         ;OUT DS:SI TABLE
         ;+0 FREE SEG
@@ -182,6 +180,9 @@ CHECK_MARK_ER11:
         ;+9 LABEL
         ;+20 OEM TYPE(0,1,2)
 
+        ;error
+        ;100h - OK-disk marked
+        ;101h - Неверно задана строка
 ENDP
 DECI2HEX        PROC
         PUSHF
@@ -287,6 +288,9 @@ MARK_BOOT_EX:
         POP     DS
         POP     SI
         RET
+        ;ERROR IN AX
+        ;102H   - Это не FLOPPY диск
+        ;103H   - Файловая система не FAT
 ENDP
 UPDATE_BOOT     PROC
         ;UPDATE BOOT
@@ -393,6 +397,7 @@ ENDP
 
 ;Shifting a text
 SHIFT_TEXT PROC
+        PUSH    AX
         PUSH    BX
         PUSH    CX
         PUSH    DX
@@ -404,8 +409,15 @@ SHIFT_TEXT PROC
         CALL    SHIFT_TEXT_SETUP
         JC      SHIFT_TEXT_ERR
         CALL    SHIFT_TEXT_EXE
-        MOV     AX,104H
+        LEA     SI,FILE_SHIFTED
+        JNC     SHIFT_TEXT_EX
 SHIFT_TEXT_ERR:
+        LEA     SI,BIGNUM
+        OR      AX,AX
+        JZ      SHIFT_TEXT_EX
+        LEA     SI,DISK_ERROR
+SHIFT_TEXT_EX:
+        CALL    WW
         POP     ES
         POP     DS
         POP     BP
@@ -414,6 +426,7 @@ SHIFT_TEXT_ERR:
         POP     DX
         POP     CX
         POP     BX
+        POP     AX
         RET
 ENDP
 SHIFT_TEXT_SETUP   PROC
@@ -427,35 +440,36 @@ SHIFT_TEXT_SETUP   PROC
         PUSH    DS
         POP     ES
         MOV     CX,DS:[SI+6]
-        MOV     AX,105H
+        MOV     AX,200H
         CMP     CX,2
-        JB      SHIFT_TEXT_SETUP_ER1
+        JNZ     SHIFT_TEXT_SETUP_ER
         ADD     SI,4
         MOV     DS,DS:[SI]
         MOV     DI,SI
         LEA     SI,INL:BUFF
         CALL    DECI2HEX
-        MOV     AX,106H
+        MOV     AX,201H
         CMP     WORD PTR ES:[DI-2],0
         JNZ     SHIFT_TEXT_SETUP_ER
         CMP     WORD PTR ES:[DI-4],32
         JNB     SHIFT_TEXT_SETUP_ER
         XOR     AX,AX
         CALL    COPY_TO
-        JMP     SHORT   SHIFT_TEXT_SETUP_ER1
-SHIFT_TEXT_SETUP_ER:
         STC
-SHIFT_TEXT_SETUP_ER1:
+SHIFT_TEXT_SETUP_ER:
+        CMC
         POP     SI
         POP     DS
         RET
-
         ;OUT DS:SI SHIFT TEXT TBL
         ;+0 FREE
         ;+2 DATA
         ;+4 OFFSET
         ;+8 FILENAME
 
+        ;ERRORS IN AX
+        ;200H   - Нет строки параматров (Нет имени файла и числа для сдвигов)
+        ;201H   - Число для сдвига вылезает за границы диапазона
 ENDP
 SHIFT_TEXT_EXE  PROC
         ;IN DS:SI SHIFT TEXT TBL
@@ -516,6 +530,7 @@ COPY_TO PROC
 ENDP
 ;Setting a computer name
 NAME_COMP       PROC
+        PUSH    AX
         PUSH    BX
         PUSH    CX
         PUSH    DX
@@ -527,8 +542,12 @@ NAME_COMP       PROC
         CALL    NAME_COMP_SETUP
         JC      NAME_COMP_ER
         CALL    NAME_COMPUTER
-        MOV     AX,107H
+        LEA     SI,COMPNAME_SETTED
+        JMP     SHORT   NAME_COMP_EX
 NAME_COMP_ER:
+        LEA     SI,BIGNUM
+NAME_COMP_EX:
+        CALL    WW
         POP     ES
         POP     DS
         POP     BP
@@ -537,6 +556,7 @@ NAME_COMP_ER:
         POP     DX
         POP     CX
         POP     BX
+        POP     AX
         RET
 ENDP
 NAME_COMP_SETUP   PROC
@@ -550,28 +570,30 @@ NAME_COMP_SETUP   PROC
         PUSH    DS
         POP     ES
         MOV     CX,DS:[SI+6]
-        MOV     AX,105H
+        MOV     AX,300H
         CMP     CX,2
-        JB      NAME_COMP_SETUP_ER1
+        JNZ     NAME_COMP_SETUP_ER
         ADD     SI,4
         MOV     DS,DS:[SI]
         MOV     DI,SI
         LEA     SI,INL:BUFF
         CALL    DECI2HEX
-        MOV     AX,106H
+        MOV     AX,301H
         CMP     WORD PTR ES:[DI-2],0
         JNZ     NAME_COMP_SETUP_ER
-        CMP     WORD PTR ES:[DI-4],100H
+        CMP     WORD PTR ES:[DI-4],32
         JNB     NAME_COMP_SETUP_ER
         MOV     CX,15
         CALL    COPY&OVERWRITE
-        JMP     SHORT   NAME_COMP_SETUP_ER1
-NAME_COMP_SETUP_ER:
         STC
-NAME_COMP_SETUP_ER1:
+NAME_COMP_SETUP_ER:
+        CMC
         POP     SI
         POP     DS
         RET
+        ;ERROR IN AX
+        ;300H   - Неправильные параметры строки
+        ;301H   - Номер компьютера вылезает за диапазон
 ENDP
 NAME_COMPUTER   PROC
         ;IN DS:SI SHIFT TEXT TBL
@@ -612,26 +634,20 @@ TBL     DW      BUFFF
         DB      20H     DUP      (0)
 ;END OF TABLE
 
-
-;ERROR TABLE
-FIRST_ERROR     DW      DISK_ERROR
-SECOND_ERROR    DW      DISK_MARKED,NONE_PARAM,NO_FLOPPY,NON_FAT
-                DW      FILE_SHIFTED,VERY_SMALL,BIGNUM,COMPNAME_SETTED
-
-
 ;OK
-DISK_MARKED     DB      'Дискета помечена',0dh,0ah,0
-FILE_SHIFTED    DB      'Файл сдвинут',0dh,0ah,0
-COMPNAME_SETTED DB      'Новое имя компьютера установлено',0dh,0ah,0
+DISK_MARKED     DB      'Diskette marked',0dh,0ah,0
+FILE_SHIFTED    DB      'File shifted',0dh,0ah,0
+COMPNAME_SETTED DB      'New computername setted',0dh,0ah,0
 ;END OK
 
 ;ERRORS
-DISK_ERROR      DB      'Ошибка при работе с диском',0dh,0ah,0
-NONE_PARAM      DB      'Отсутствуют параметры',0dh,0ah,0
-VERY_SMALL      DB      'Маловато параметров',0dh,0ah,0
-NO_FLOPPY       DB      'Это не Floppy дискета',0dh,0ah,0
-NON_FAT         DB      'Файловая система не FAT',0dh,0ah,0
-BIGNUM          DB      'Число вылезает за границы диапазона',0dh,0ah,0
+DISK_ERROR      DB      'Disk Error',0dh,0ah,0
+VERY_MANY       DB      'Very many parameters',0dh,0ah,0
+VERY_SMALL      DB      'Where parameters ?',0dh,0ah,0
+NO_FLOPPY       DB      'This is no floppy drive',0dh,0ah,0
+NON_FAT         DB      'Non FAT type of file system',0dh,0ah,0
+
+BIGNUM          DB      'Number very big',0dh,0ah,0
 ;END OF ERRORS
 ENDS
 
